@@ -12,8 +12,8 @@ describe 'dynatrace release', :linux do
 
   let(:release_version) { Bosh::Template::Test::InstanceSpec.new().to_h().merge({'release' => { 'version' => '123' }}) }
 
-  describe 'dynatrace-oneagent job' do
-    let(:job) { release.job('dynatrace-oneagent') }
+  describe 'dynatrace-oneagent-lightweight job' do
+    let(:job) { release.job('dynatrace-oneagent-lightweight') }
 
     describe 'pre-start' do
       let(:template) { job.template('bin/pre-start') }
@@ -188,7 +188,7 @@ describe 'dynatrace release', :linux do
           expect(stdout).to match(/Installation finished/)
           expect(stdout).to_not match(/Error/)
           expect(status.exitstatus).to eq 0
-          expect(FileTest.exist?('/var/vcap/sys/run/dynatrace-oneagent/dynatrace-watchdog.pid')).to be true
+          expect(FileTest.exist?('/var/vcap/sys/run/dynatrace-oneagent-lightweight/dynatrace-watchdog.pid')).to be true
         end
       end
 

@@ -30,6 +30,9 @@ Replace the commands above respectively
 
 Releases since v1.0.5 also require BOSH Director v263 or greater.
 
+With Release 1.4.0 the overall release and the OneAgent job for Linux have been renamed to allow compatibility with the immutable OneAgent BOSH Release. This important change allows users to deploy the immutable release to the majority of hosts while still allowing lightweight release deployment to jobs where the immutable release is not available (i.e. Windows jobs).
+
+
 ## License
 
 Licensed under the MIT License. See the [LICENSE](https://github.com/dynatrace-innovationlab/bosh-oneagent-release/blob/master/LICENSE) file for details.

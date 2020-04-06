@@ -1,0 +1,278 @@
+#!/bin/bash
+
+export PATH="/var/vcap/packages/dynatrace-oneagent-lightweight:$PATH"
+
+export DOWNLOADURL="<%= p("dynatrace.downloadurl") %>"
+export PROXY="<%= p("dynatrace.proxy") %>"
+export ENV_ID="<%= p("dynatrace.environmentid") %>"
+export API_TOKEN="<%= p("dynatrace.apitoken") %>"
+export API_URL="<%= p("dynatrace.apiurl") %>"
+export SSL_MODE="<%= p("dynatrace.sslmode") %>"
+export APP_LOG_CONTENT_ACCESS="<%= p("dynatrace.applogaccess") %>"
+export HOST_GROUP="<%= p("dynatrace.hostgroup") %>"
+export HOST_TAGS="<%= p("dynatrace.hosttags") %>"
+export HOST_PROPS="<%= p("dynatrace.hostprops") %> BOSHReleaseVersion=<%= spec.release.version %>"
+export INFRA_ONLY="<%= p("dynatrace.infraonly") %>"
+export VALIDATEDOWNLOAD="<%= p("dynatrace.validatedownload") %>"
+export INSTALLERARGS="<%= p("dynatrace.installerargs") %>"
+export INJECTION_RULES="<%= p("dynatrace.injectionrules") %>"
+
+export TMPDIR="/var/vcap/data/dt_tmp"
+
+CONFIG_DIR="/var/lib/dynatrace/oneagent/agent/config"
+RUN_DIR="/var/vcap/sys/run/dynatrace-oneagent-lightweight"
+LOG_DIR="/var/vcap/sys/log/dynatrace-oneagent-lightweight"
+LOG_FILE="$LOG_DIR/dynatrace-install.log"
+
+installLog() {
+    echo "$1" | tee -a "${LOG_FILE}"
+}
+
+installLog "Dynatrace BOSH Add-on version <%= spec.release.version %>"
+
+if ! mkdir -p "${RUN_DIR}" "${LOG_DIR}" "${CONFIG_DIR}"; then
+    installLog "ERROR: Creating directories ${RUN_DIR}, ${LOG_DIR} and ${CONFIG_DIR} failed!"
+    exit 1
+fi
+
+if [[ -n "$INJECTION_RULES" ]]; then
+    installLog "INFO: Config for DT_INJECTION_RULES found, setting global environment variable"
+
+    systemctl set-environment DT_INJECTION_RULES="$INJECTION_RULES"
+    echo "DefaultEnvironment=DT_INJECTION_RULES=$INJECTION_RULES" >> /etc/systemd/system.conf
+    systemctl daemon-reload
+fi
+
+if [[ -z "$INSTALLERARGS" ]]; then
+    if [[ "$PROXY" != "" ]]; then
+        installLog "Setting proxy to ${PROXY}"
+        INSTALLERARGS="$INSTALLERARGS PROXY=$PROXY"
+        export https_proxy="$PROXY"
+        export http_proxy="$PROXY"
+    fi
+
+    if [[ "$APP_LOG_CONTENT_ACCESS" == "1" ]]; then
+        installLog "Enabling log monitoring"
+        INSTALLERARGS="$INSTALLERARGS APP_LOG_CONTENT_ACCESS=$APP_LOG_CONTENT_ACCESS"
+    fi
+
+    if [[ "$HOST_GROUP" != "" ]]; then
+        installLog "Setting host group to ${HOST_GROUP}"
+        INSTALLERARGS="$INSTALLERARGS HOST_GROUP=$HOST_GROUP"
+    fi
+
+    if [[ "$INFRA_ONLY" == "1" ]]; then
+        installLog "Enabling Infra-Only mode"
+        INSTALLERARGS="$INSTALLERARGS INFRA_ONLY=$INFRA_ONLY"
+    fi
+else
+    if [[ "$INSTALLERARGS" =~ "APP_LOG_CONTENT_ACCESS" ]]; then
+        INSTALLERARGS="$INSTALLERARGS"
+    else
+        installLog "Enabling log monitoring"
+        INSTALLERARGS="$INSTALLERARGS APP_LOG_CONTENT_ACCESS=1"
+    fi
+fi
+
+# set downloadurl to fallback if not given
+if [[ "$DOWNLOADURL" == "" ]]; then
+    if [[ "$ENV_ID" == "" ]] || [[ "$API_TOKEN" == "" ]]; then
+        installLog "Invalid configuration:"
+        installLog "Please set environment ID and API token for Dynatrace OneAgent."
+        exit 1
+    fi
+    if [[ "$API_URL" == "" ]]; then
+        API_URL="https://$ENV_ID.live.dynatrace.com/api"
+    fi
+    DOWNLOADURL="$API_URL/v1/deployment/installer/agent/unix/default/latest"
+fi
+
+# set validatedownload to false (fallback) if not set
+if [[ "$VALIDATEDOWNLOAD" == "" ]]; then
+    installLog "Download validation is off by default"
+    VALIDATEDOWNLOAD=false
+fi
+
+if [[ "$VALIDATEDOWNLOAD" == true ]]; then
+    installLog "Enabling download validation"
+    VALIDATEDOWNLOAD=true
+else
+    VALIDATEDOWNLOAD=false
+fi
+
+SSL_INSECURE_CURL=""
+SSL_INSECURE_WGET=""
+if [[ "$SSL_MODE" == "all" ]]; then
+    installLog "accepting all ssl certificates for agent download"
+    SSL_INSECURE_CURL="--insecure"
+    SSL_INSECURE_WGET="--no-check-certificate"
+fi
+
+INSTALL_BASE_DIR="/var/vcap/data"
+if [[ -d ${INSTALL_BASE_DIR} ]] && [[ $(df --output=avail -m ${INSTALL_BASE_DIR} | awk '{if (NR==2) {print $1}}') -gt 2048 ]]; then
+    INSTALL_DIR="${INSTALL_BASE_DIR}/dynatrace/oneagent"
+else
+    installLog "Not enough disk space available on ${INSTALL_BASE_DIR}!"
+    exit 1
+fi
+
+setWatchdogPid() {
+    local AGENT_WATCHDOG="oneagentwatchdog"
+
+    echo "Setting ${AGENT_WATCHDOG} pid"
+    watchdogPID=$(pgrep -f "${AGENT_WATCHDOG}")
+    echo "${watchdogPID}" > "${RUN_DIR}/dynatrace-watchdog.pid"
+}
+
+setHostTags() {
+    if [[ "${HOST_TAGS}" != "" ]]; then
+        local hostTagsFile="${CONFIG_DIR}/hostautotag.conf"
+
+        installLog "Setting host tags to '${HOST_TAGS}' at ${hostTagsFile}"
+        echo -n "${HOST_TAGS}" > "${hostTagsFile}"
+    fi
+}
+
+setHostProps() {
+    local hostPropsFile="${CONFIG_DIR}/hostcustomproperties.conf"
+
+    installLog "Setting host properties to '${HOST_PROPS}' at ${hostPropsFile}"
+    echo -n "${HOST_PROPS}" > "${hostPropsFile}"
+}
+
+validateAgent() {
+    installLog "Validating the downloaded file..." 
+    if [[ -e $1 ]]; then
+        rm -f dt-root.cert.pem
+        wget https://ca.dynatrace.com/dt-root.cert.pem
+
+        if [[ $? != 0 ]] || ! openssl -h &> /dev/null ; then
+            installLog "WARNING: could not validate integrity of the download"
+            return 2
+        fi
+
+        ( echo 'Content-Type: multipart/signed; protocol="application/x-pkcs7-signature"; micalg="sha-256"; boundary="--SIGNED-INSTALLER"'; \
+          echo ; echo ; echo '----SIGNED-INSTALLER' ; cat $1 ) \
+        | openssl cms -verify -CAfile dt-root.cert.pem > /dev/null
+
+       if [[ $? != 0 ]]; then
+           installLog "ERROR: Validation failed! An error occurred while trying to download the Dynatrace agent"
+           return 1
+        else
+           return 0
+        fi
+    else
+        installLog "ERROR: Validation failed! An error occurred while trying to download the Dynatrace agent"
+        return 1
+    fi
+}
+
+downloadAgent() {
+    local downloadUrl=$1
+    local installerFile=$2
+    local validateDownload=$3
+    local userAgent="bosh/<%= spec.release.version %>"
+
+    if curl -h &> /dev/null ; then
+        local downloadCommand="curl -s -S -f --connect-timeout 10 $SSL_INSECURE_CURL ${downloadUrl} -o ${installerFile} --user-agent ${userAgent}"
+    elif wget -h &> /dev/null ; then
+        local downloadCommand="wget --connect-timeout=10 -nv $SSL_INSECURE_WGET ${downloadUrl} -O ${installerFile} --user-agent=${userAgent}"
+    else
+        installLog "ERROR: Neither curl nor wget executable found!"
+        exit 1
+    fi
+
+    local retryTimeout=0
+    local downloadErrors=0
+    while [[ $downloadErrors -lt 3 ]]; do
+        sleep $retryTimeout
+
+        installLog "Downloading agent installer from ${downloadUrl}"
+        $downloadCommand --header "Authorization: Api-Token $API_TOKEN" 2>&1 | tee -a "${LOG_FILE}"
+
+        if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+            downloadErrors=$((downloadErrors+1))
+            retryTimeout=$((retryTimeout+5))
+
+            if [[ $downloadErrors -lt 3 ]]; then
+                installLog "Dynatrace agent download failed, retrying in $retryTimeout seconds"
+            fi
+        else
+            if [[ $validateDownload == true ]] && [[ -e $2 ]]; then
+                validateAgent $2
+                if [[ $? -ne 0 ]]; then
+                    installLog "Download validation failed!"
+                else
+                    break
+                fi
+            else
+                break
+            fi
+        fi
+    done
+
+    if [[ $downloadErrors == 3 ]]; then
+        installLog "ERROR: Downloading agent installer failed!"
+        exit 1
+    fi
+
+    installLog "Download was successful"
+}
+
+runInstaller() {
+    local installerRetries=10
+    leftoverSymlink="/opt/dynatrace/oneagent"
+
+    if [[ -L "${leftoverSymlink}" ]] && [[ ! -e "${leftoverSymlink}" ]]; then
+        installLog "Removing broken symlink ${leftoverSymlink}"
+        rm "${leftoverSymlink}"
+    elif [[ -d "${leftoverSymlink}" ]]; then
+        installLog "Removing leftover directory ${leftoverSymlink}"
+        rm -rf "${leftoverSymlink}"
+    fi
+
+    #check if another installer is running
+    while [[ $installerRetries -ge 0 ]]; do
+        pgrep -f Dynatrace-OneAgent > /dev/null
+        local installerFound=$?
+        if [[ $installerFound -eq 1 ]]; then
+            sh "${INSTALLER_FILE}" ${INSTALLERARGS} INSTALL_PATH="$INSTALL_DIR" 2>&1 | tee -a "$LOG_FILE"
+            if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+                installLog "ERROR: Installation failed"
+                exit 1
+            fi
+            break
+        elif [[ $installerFound -eq 1 ]] && [[ $installerRetries -lt 10 ]]; then
+            # since there already ran an installer a moment ago,
+            # there is no point in running it again just now
+            break
+        elif [[ $installerFound -eq 0 ]] && [[ $installerRetries -gt 0 ]]; then
+            installLog "Another installer instance found running, waiting 30 seconds before retrying, $((installerRetries-1)) retries left"
+            sleep 30
+            installerRetries=$((installerRetries-1))
+            continue
+        elif [[ $installerFound -eq 0 ]] && [[ $installerRetries -lt 1 ]]; then
+            installLog "ERROR: Waiting for other installer to end took too long"
+            exit 1
+        fi
+    done
+}
+
+# Installation process starts here
+if [[ ! -d "${TMPDIR}" ]]; then
+    mkdir -p "${TMPDIR}"
+fi
+
+setHostTags
+setHostProps
+
+INSTALLER_FILE="$TMPDIR/dynatrace-oneagent-lightweight-Linux.sh"
+downloadAgent "$DOWNLOADURL" "$INSTALLER_FILE" "$VALIDATEDOWNLOAD"
+
+runInstaller
+
+setWatchdogPid
+
+rm -r "$TMPDIR"
+
+installLog "Installation finished"

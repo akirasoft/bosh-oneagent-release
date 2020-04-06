@@ -1,0 +1,56 @@
+---
+name: dynatrace-oneagent-lightweight
+description: "This job will run Dynatrace OneAgent installer for Linux"
+
+templates:
+  pre-start.erb: bin/pre-start
+  start-oneagent.sh.erb: bin/start-oneagent.sh
+  stop-oneagent.sh.erb: bin/stop-oneagent.sh
+  drain.erb: bin/drain
+  service.sh: bin/service.sh
+
+packages: []
+
+properties:
+  dynatrace.environmentid:
+    description: 'Dynatrace environment ID'
+  dynatrace.apitoken:
+    description: 'API token'
+  dynatrace.apiurl:
+    description: 'URL to Dynatrace API endpoint'
+    default: ''
+  dynatrace.sslmode:
+    description: 'SSL mode (all) to accept self-signed SSL certs'
+    default: ''
+  dynatrace.downloadurl:
+    description: 'Download URL for direct download'
+    default: ''
+  dynatrace.proxy:
+    description: 'Proxy for server communication'
+    default: ''
+  dynatrace.applogaccess:
+    description: 'Enable access to discovered application log files content'
+    default: '1'
+  dynatrace.hostgroup:
+    description: 'Provide a hostgroup name for your CF deployment'
+    default: ''
+  dynatrace.hosttags:
+    description: 'Host tags for this VM. Format like DT_TAGS ENV variable: single line, space separated pairs of <key>=<value>'
+    default: ''
+    example: landscape=production team=my_team
+  dynatrace.hostprops:
+    description: 'Host properties for this VM. Format like DT_CUSTOM_PROP ENV variable: single line, space separated pairs of <key>=<value>'
+    default: ''
+    example: Department=Acceptance Stage=Sprint
+  dynatrace.infraonly:
+    description: 'Enable Cloud-Infrastructure only monitoring (Disables Full-Stack monitoring)'
+    default: '0'
+  dynatrace.validatedownload:
+    description: 'Enable validation of the download via certificate'
+    default: 'false'
+  dynatrace.installerargs:
+    description: 'Arguments to hand over to the Dynatrace OneAgent installer'
+    default: ''
+  dynatrace.injectionrules:
+    description: 'DT_INJECTION_RULES'
+    default: ''
