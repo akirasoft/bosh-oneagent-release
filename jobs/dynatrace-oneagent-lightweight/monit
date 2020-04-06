@@ -1,0 +1,8 @@
+check process dynatrace-oneagent-lightweight
+  with pidfile /var/vcap/sys/run/dynatrace-oneagent-lightweight/dynatrace-watchdog.pid
+  start program "/var/vcap/jobs/dynatrace-oneagent-lightweight/bin/start-oneagent.sh"
+    with timeout 600 seconds
+  stop program "/var/vcap/jobs/dynatrace-oneagent-lightweight/bin/stop-oneagent.sh"
+    with timeout 120 seconds
+  group vcap
+

@@ -1,0 +1,45 @@
+releases:
+  - name: dynatrace-oneagent
+    version: 1.187.100.20200217-114813
+  - name: dynatrace-oneagent-lightweight
+    version: 1.4.0
+
+addons:
+# Immutable release section, deploying to Linux stemcells  
+- name: dynatrace-oneagent-addon
+  jobs:
+  - name: dynatrace-oneagent
+    release: dynatrace-oneagent
+  include:
+    stemcell:
+    - os: ubuntu-xenial
+  exclude:
+    lifecycle: errand
+  properties:
+    dynatrace:
+      environmentid: <environmentId>
+      server: https://{your-managed-cluster.com}/e/{environmentid}/api
+      tenanttoken: <paas-token>
+      sslmode: all
+      hostgroup: <example_hostgroup>
+      hosttags: <example=example_tag1 example2=example_tag2>
+# Lightweight release section, deploying just to Windows stemcells      
+- name: dynatrace-oneagent-windows-addon
+  jobs:
+  - name: dynatrace-oneagent-windows
+    release: dynatrace-oneagent-lightweight
+  include:
+    deployments:
+    - pas-windows-c58f9c847983f0d05926
+    stemcell:
+    - os: windows1803
+  exclude:
+    lifecycle: errand
+  properties:
+    dynatrace:
+      apitoken: <paas-token>
+      apiurl: https://{your-managed-cluster.com}/e/{environmentid}/api
+      environmentid: <environmentId>
+      hostgroup: <example_hostgroup>
+      hosttags: <example=example_tag1 example2=example_tag2>
+      sslmode: all
