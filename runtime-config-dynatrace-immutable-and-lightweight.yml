@@ -29,8 +29,6 @@ addons:
   - name: dynatrace-oneagent-windows
     release: dynatrace-oneagent-lightweight
   include:
-    deployments:
-    - pas-windows-c58f9c847983f0d05926
     stemcell:
     - os: windows1803
   exclude:
