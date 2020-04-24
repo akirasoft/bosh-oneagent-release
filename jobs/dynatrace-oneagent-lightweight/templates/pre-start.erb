@@ -258,6 +258,12 @@ runInstaller() {
     done
 }
 
+changeGroup() {
+    installLog "adding dtuser to vcap group"
+    usermod -a -G vcap dtuser
+}
+
+
 # Installation process starts here
 if [[ ! -d "${TMPDIR}" ]]; then
     mkdir -p "${TMPDIR}"
@@ -270,6 +276,7 @@ INSTALLER_FILE="$TMPDIR/dynatrace-oneagent-lightweight-Linux.sh"
 downloadAgent "$DOWNLOADURL" "$INSTALLER_FILE" "$VALIDATEDOWNLOAD"
 
 runInstaller
+changeGroup
 
 setWatchdogPid
 
